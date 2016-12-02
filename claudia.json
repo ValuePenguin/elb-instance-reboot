@@ -1,0 +1,7 @@
+{
+  "lambda": {
+    "role": "elb-instance-reboot-executor",
+    "name": "elb-instance-reboot",
+    "region": "us-east-1"
+  }
+}

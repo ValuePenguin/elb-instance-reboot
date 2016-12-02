@@ -3,37 +3,51 @@ const waterfall = require('async-waterfall');
 
 exports.handler = function(event, context, callback) {
 
+  console.log('event: ', JSON.stringify(event));
   const message = JSON.parse(event.Records[0].Sns.Message);
-  const elb = (message.Trigger && message.Trigger.Dimensions) ? message.Trigger.Dimensions[0] : null;
+  console.log('message: ', JSON.stringify(message));
+  const targetGroup = (message.Trigger && message.Trigger.Dimensions) ? message.Trigger.Dimensions[1] : null;
+  console.log('targetGroup: ', JSON.stringify(targetGroup));
 
-  if (!elb) return console.log('No elb value found in message', message);
+  if (!targetGroup) return console.log('No TargetGroup value found in message', message);
+  const targetGroupName = targetGroup.value.match(/^targetgroup\/(.*)\//)
+    ? targetGroup.value.match(/^targetgroup\/(.*)\//)[1]
+    : null;
+  if (!targetGroupName) return console.log('Malformed TargetGroup value found in message', targetGroup);
+  console.log('targetGroupName', targetGroupName);
 
-  const elbApi = new AWS.ELB();
+  const elbApi = new AWS.ELBv2();
   const ec2Api = new AWS.EC2();
 
   waterfall([
-    function(next){
+    function(next) {
       const params = {
-        LoadBalancerNames: [elb.value]
+        Names: [targetGroupName]
       };
-      elbApi.describeLoadBalancers(params, next);
+      elbApi.describeTargetGroups(params, next);
+    },
+    function(data, next) {
+      console.log('describeTargetGroups: ', JSON.stringify(data));
+      const params = {
+        TargetGroupArn: data.TargetGroups[0].TargetGroupArn
+      }
+      elbApi.describeTargetHealth(params, next);
     },
     function(data, next){
-      const params = {
-        LoadBalancerName: elb.value,
-        Instances: data.LoadBalancerDescriptions[0].Instances
-      };
-      elbApi.describeInstanceHealth(params, next);
-    },
-    function(data, next){
-      const unhealthyNodes = data.InstanceStates
-        .filter(instance => instance.State === 'OutOfService')
-        .map(instance => instance.InstanceId);
+      console.log('describeTargetHealth: ', JSON.stringify(data));
+      const unhealthyNodes = data.TargetHealthDescriptions
+        .filter(instance => instance.TargetHealth.State == "unhealthy" && instance.TargetHealth.Reason != "Elb.InternalError")
+        .map(instance => instance.Target.Id);
+      console.log('unhealthyNodes', JSON.stringify(unhealthyNodes));
       if (unhealthyNodes.length) {
-        console.log('Rebooting unhealthy nodes', unhealthyNodes);
-        ec2Api.rebootInstances({InstanceIds: unhealthyNodes}, next);
+        if (unhealthyNodes.length > 1) {
+          console.log('multiple instances unhealthy but will only reboot one');
+        }
+        console.log('rebooting instance', unhealthyNodes[0]);
+        ec2Api.rebootInstances({InstanceIds: [unhealthyNodes[0]]}, next);
       } else {
-        next(null, 'All nodes InService, no reboots necessary');
+        console.log('no unhealthy nodes');
+        next(null, 'All nodes healthy, no reboots necessary');
       }
     }
   ], function (err, result) {

@@ -7,6 +7,8 @@
             "Action": [
                 "elasticloadbalancing:DescribeLoadBalancers",
                 "elasticloadbalancing:DescribeInstanceHealth",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth",
                 "ec2:RebootInstances"
             ],
             "Resource": [
